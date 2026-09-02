@@ -2,6 +2,10 @@
 
 [![npm version](https://img.shields.io/npm/v/@weibaohui/dsh-plugin-kit)](https://www.npmjs.com/package/@weibaohui/dsh-plugin-kit)
 
+# @weibaohui/dsh-plugin-kit
+
+[![npm version](https://img.shields.io/npm/v/@weibaohui/dsh-plugin-kit)](https://www.npmjs.com/package/@weibaohui/dsh-plugin-kit)
+
 dsh 插件共享工具箱。把系列插件中重复的「AI 动作按钮」能力收拢为一处：
 
 - **宿主**：`createShareRunJob` —— 把提示词交给真实 agent 会话执行（进程内 agents 服务优先流式，缺失降级 headless spawn；30 分钟超时 + 输出截断），任务状态由调用方轮询

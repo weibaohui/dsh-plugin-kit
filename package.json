@@ -15,7 +15,8 @@
   ],
   "scripts": {
     "check": "node --check src/index.js && node --check client/source.js",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "prepublishOnly": "npm run check && npm test"
   },
   "engines": {
     "node": ">=22.5"
@@ -26,5 +27,18 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "dsh-plugin",
+    "ui",
+    "kit"
+  ],
+  "homepage": "https://github.com/weibaohui/dsh-plugin-kit#readme",
+  "bugs": {
+    "url": "https://github.com/weibaohui/dsh-plugin-kit/issues"
   }
 }
