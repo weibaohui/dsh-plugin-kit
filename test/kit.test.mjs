@@ -17,3 +17,11 @@ test('createShareRunJob：promptHead 截断与 output 封顶常量', () => {
   assert.equal(job.promptHead.length, 80)
   assert.equal(kit.SHARE_RUN_OUTPUT_CAP, 256 * 1024)
 })
+
+test('client 主按钮样式随主题翻转（state-business-primary + inverted 标签色，不硬编码白字）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../client/source.js', import.meta.url), 'utf8')
+  assert.match(src, /background: 'var\(--dsw-alias-state-business-primary/)
+  assert.match(src, /color: 'var\(--dsw-alias-label-primary-inverted/)
+  assert.doesNotMatch(src, /color: '#fff'/)
+})
