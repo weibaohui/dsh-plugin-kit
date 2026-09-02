@@ -1,6 +1,6 @@
 {
   "name": "@weibaohui/dsh-plugin-kit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "dsh 插件共享工具箱：AI 动作分享抽屉（ntd ActionButton 同款交互）+ 宿主任务执行器，供系列插件复用",
   "license": "MIT",
   "main": "src/index.js",
