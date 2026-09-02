@@ -43,6 +43,13 @@ var PluginKit = (function () {
       var copied = _c[0]; var setCopied = _c[1]
       var _e = useState('')
       var error = _e[0]; var setError = _e[1]
+      var _d = useState(false)
+      var dirty = _d[0]; var setDirty = _d[1]
+
+      // initialPrompt 异步到位（如宿主先要下发真实路径）时跟随刷新；用户编辑过则不打断
+      useEffect(function () {
+        if (!dirty) setPrompt(props.initialPrompt || '')
+      }, [props.initialPrompt])
 
       useEffect(function () {
         if (job === null || job.status !== 'running' || typeof props.poll !== 'function') return
@@ -78,7 +85,7 @@ var PluginKit = (function () {
             props.rows.map(function (r, i) {
               return r[1] ? h('div', { key: i }, h('b', null, r[0] + '：'), h('span', null, r[1])) : null
             })) : null,
-          h('textarea', { value: prompt, onChange: function (e) { setPrompt(e.target.value) }, spellCheck: false, style: inputStyle }),
+          h('textarea', { value: prompt, onChange: function (e) { setDirty(true); setPrompt(e.target.value) }, spellCheck: false, style: inputStyle }),
           error !== '' ? h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error,#c75050)' } }, error) : null,
           job !== null ? h('div', null,
             h('div', { style: { fontSize: 12, opacity: .7, margin: '4px 0' } }, (labels.outputLabel || 'Output') + ' · ' + statusText),
