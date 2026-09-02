@@ -14,8 +14,8 @@ dsh 插件共享工具箱。把系列插件中重复的「AI 动作按钮」能�
 ## 消费方式
 
 ```jsonc
-// 插件 package.json
-"dependencies": { "@weibaohui/dsh-plugin-kit": "github:weibaohui/dsh-plugin-kit" }
+// 插件 package.json（npm 源；dsh plugin add 时作为传递依赖一次性装上）
+"dependencies": { "@weibaohui/dsh-plugin-kit": "^0.1.0" }
 ```
 
 `dsh plugin add` 安装插件时作为传递依赖一次性装上。
