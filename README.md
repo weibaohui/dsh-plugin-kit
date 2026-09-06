@@ -9,7 +9,7 @@
 dsh 插件共享工具箱。把系列插件中重复的「AI 动作按钮」能力收拢为一处：
 
 - **宿主**：`createShareRunJob` —— 把提示词交给真实 agent 会话执行（进程内 agents 服务优先流式，缺失降级 headless spawn；30 分钟超时 + 输出截断），任务状态由调用方轮询
-- **client**：`PluginKit.ActionShareDialog` —— ntd ActionButton 同款交互（可编辑提示词 + 参数预览 + 复制 + 执行 + 实时输出），全内联样式，消费者无需自带 CSS
+- **client**：`PluginKit.ActionShareDialog` —— ntd ActionButton 同款交互（模板参数输入 + 可编辑提示词 + 参数预览 + 复制 + 执行 + 实时输出 + 完成态插槽），全内联样式，消费者无需自带 CSS
 
 ## 消费方式
 
@@ -33,8 +33,21 @@ const job = createShareRunJob({ binary: 'dsh', prompt, dir, jobs: shareRunJobs, 
 
 ```js
 const ShareDialog = PluginKit.makeActionShareDialog(__React)
+// 分享态（最小用法）
 // h(ShareDialog, { title, hint, rows, initialPrompt, run, poll, labels, onClose })
+// 创建/生成态（模板参数 + 完成态插槽，ntd ExpertCreateModal 同款）
+// h(ShareDialog, {
+//   title, hint,
+//   params: [{ key: 'description', label: '描述', multiline: true }],   // {{description}} 实时替换进 prompt
+//   initialPrompt: TEMPLATE,
+//   run, poll,
+//   completedView: ({ job, output, close, retry }) => node,             // job done 后由插槽接管渲染
+//   labels, onClose,
+// })
 ```
+
+`params` 值实时替换进 prompt，用户手改过 prompt 后参数变化不再覆盖（脏跟踪）；
+`completedView` 接管后 Dialog footer 置空，确认/重试/关闭按钮由插槽自承。
 
 ## 设计决策
 
