@@ -70,17 +70,21 @@ async function runShareInProcess(services, { prompt, dir, job, logger }) {
   const liveLine = (text) => {
     job.output = (job.output + text).slice(-SHARE_RUN_OUTPUT_CAP)
   }
+  // 事件数组防御性取用：spill/裁剪策略下形状可能变化，绝不让 pump 抛错拖垮任务
+  const eventList = () => {
+    try { return Array.isArray(agent.session.events) ? agent.session.events : [] } catch { return [] }
+  }
   const pump = () => {
-    for (const ev of agent.session.events) {
+    for (const ev of eventList()) {
       if (ev.seq < firstSeq || seen.has(ev.seq)) continue
       seen.add(ev.seq)
       const d = ev.data || {}
-      if (ev.type === 'assistant/chunk' && d.chunk && d.chunk.type === 'text' && d.chunk.text) {
+      // 流式文本：text-delta 增量（block-assembler 形状）；'text' 整块为旧形状兜底。
+      // reasoning-delta 刻意不进输出（输出=可见回答，不含思考流）。
+      if (ev.type === 'assistant/chunk' && d.chunk && typeof d.chunk.text === 'string' && (d.chunk.type === 'text-delta' || d.chunk.type === 'text')) {
         liveLine(d.chunk.text)
       } else if (ev.type === 'tool/call') {
-        liveLine('\n[tool] ' + d.name + ' ')
-      } else if (ev.type === 'assistant/message') {
-        liveLine('\n')
+        liveLine('\n[tool] ' + String(d.name || '') + ' ')
       }
     }
   }
@@ -92,6 +96,24 @@ async function runShareInProcess(services, { prompt, dir, job, logger }) {
   } finally {
     clearInterval(timer)
     pump()
+  }
+  // 兜底：流式全程未捕获到文本时（事件形状漂移、spill 裁剪等），从最终 assistant
+  // 消息的 content 块提取可见文本全文——宁可慢一次拼接，也不交回空输出
+  if (String(job.output).trim() === '') {
+    try {
+      const list = eventList()
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        const ev = list[i]
+        const msg = ev && ev.type === 'assistant/message' && ev.data ? ev.data.message : undefined
+        if (msg && msg.role === 'assistant' && Array.isArray(msg.content)) {
+          const text = msg.content
+            .filter((b) => b && (b.type === 'text' || b.type === undefined) && typeof b.text === 'string')
+            .map((b) => b.text)
+            .join('')
+          if (text.trim() !== '') { job.output = text.slice(-SHARE_RUN_OUTPUT_CAP); break }
+        }
+      }
+    } catch { /* 兜底失败保持原样 */ }
   }
   try { await services.sessions.flush(agent.session) } catch {}
   job.status = 'done'
