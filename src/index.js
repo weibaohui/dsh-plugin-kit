@@ -70,9 +70,16 @@ async function runShareInProcess(services, { prompt, dir, job, logger }) {
   const liveLine = (text) => {
     job.output = (job.output + text).slice(-SHARE_RUN_OUTPUT_CAP)
   }
-  // 事件数组防御性取用：spill/裁剪策略下形状可能变化，绝不让 pump 抛错拖垮任务
+  // 事件数组防御性取用：spill/裁剪策略下形状可能变化，绝不让 pump 抛错拖垮任务。
+  // dsh 0.1.2-rc.1 把会话事件数组从 session.events 改名为 session.log——log 优先、
+  // events 兜底，兼容新旧宿主（缺失时 pump 与兜底提取都拿不到输出）。
   const eventList = () => {
-    try { return Array.isArray(agent.session.events) ? agent.session.events : [] } catch { return [] }
+    try {
+      const s = agent.session
+      if (Array.isArray(s.log)) return s.log
+      if (Array.isArray(s.events)) return s.events
+      return []
+    } catch { return [] }
   }
   const pump = () => {
     for (const ev of eventList()) {
