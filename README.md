@@ -53,3 +53,13 @@ const ShareDialog = PluginKit.makeActionShareDialog(__React)
 
 - **构建期内联而非运行时插件**：kit 不进 profile 的 bundle 图，无降级逻辑；消费者构建时把 client 源码打进自己的 bundle，`dsh plugin add` 时宿主代码经 npm 传递依赖装齐——一次性装上，无挖坑
 - **协议无关**：run/poll 以函数注入，提示词模板归各插件自有（业务层），kit 只收骨架
+
+## 版本兼容性
+
+本插件与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`@deepseek-ai/dsh`）的版本对应关系：
+
+| 插件版本 | 适配 dsh 版本 | 备注 |
+|---------|--------------|------|
+| 0.3.2 | 0.1.7-rc.2 | 当前版本，已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
+
+> **发版约定**：每次发布新版本时，请在上表追加一行，记录该插件版本实际验证所用的 `@deepseek-ai/dsh` 版本。`package.json` 的 `engines.dsh` 声明最低支持版本；本表记录实际验证版本，二者配合使用。
