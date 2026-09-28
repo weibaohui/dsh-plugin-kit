@@ -148,5 +148,55 @@ var PluginKit = (function () {
     }
   }
 
-  return { substituteParams: substituteParams, makeActionShareDialog: makeActionShareDialog }
+  // ── 共享事件推送枢纽 ─────────────────────────────────────────────────
+  // 解决：dsh web 网关是 HTTP/1.1，同源并发只有 ~6 条连接，每个插件自建
+  // 永久 SSE 会把预算占满、首页全部排队。全页面只开一条
+  // EventSource('/dsh-event-hub/api/stream')，按帧里的 plugin 字段分发。
+  // 服务端由任意消费者经 PluginKit.ensureHostHub(ctx, {webServer, connection})
+  // 在进程内协调出唯一路由（本包 src/index.js）。
+  function ensureClientHub() {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return null
+    if (window.__dshEventHub) return window.__dshEventHub
+
+    var hubSubscribers = new Map() // plugin -> Set<fn(data, frame)>
+    var hubEs = new EventSource('/dsh-event-hub/api/stream')
+    hubEs.onmessage = function (msg) {
+      var frame
+      try { frame = JSON.parse(msg.data) } catch (e) { return }
+      if (!frame || typeof frame.plugin !== 'string') return
+      var set = hubSubscribers.get(frame.plugin)
+      if (!set) return
+      set.forEach(function (fn) {
+        try { fn(frame.data, frame) } catch (e) { /* 单个订阅者出错不影响其他 */ }
+      })
+    }
+
+    window.__dshEventHub = {
+      subscribe: function (plugin, fn) {
+        var set = hubSubscribers.get(plugin)
+        if (!set) { set = new Set(); hubSubscribers.set(plugin, set) }
+        set.add(fn)
+        return function () { set.delete(fn) }
+      },
+      readyState: function () { return hubEs.readyState },
+    }
+    return window.__dshEventHub
+  }
+
+  /**
+   * 订阅某插件的事件流：枢纽就绪则共享连接（零额外连接）；
+   * 浏览器不支持时返回 null，调用方自行回退（自有 SSE / 轮询）。
+   */
+  function connectEvents(plugin, onFrame, onState) {
+    var hub = ensureClientHub()
+    if (!hub) return null
+    var off = hub.subscribe(plugin, function (data, frame) {
+      if (onState) { try { onState('live') } catch (e) {} }
+      onFrame(data, frame)
+    })
+    if (onState) { try { onState('live') } catch (e) {} }
+    return off
+  }
+
+  return { substituteParams: substituteParams, makeActionShareDialog: makeActionShareDialog, ensureClientHub: ensureClientHub, connectEvents: connectEvents }
 })()

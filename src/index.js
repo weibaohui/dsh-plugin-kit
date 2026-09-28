@@ -127,4 +127,94 @@ async function runShareInProcess(services, { prompt, dir, job, logger }) {
   logger.info && logger.info(`dsh-plugin-kit: share run ${job.id} done`)
 }
 
-module.exports = { createShareRunJob, runShareInProcess, SHARE_RUN_TIMEOUT_MS, SHARE_RUN_OUTPUT_CAP }
+// ── 共享事件推送枢纽（宿主侧）──────────────────────────────────────────
+// 解决：dsh web 网关是 HTTP/1.1，同源并发只有 ~6 条连接，每个插件自建
+// 永久 SSE 会把预算占满、首页全部排队。第一个调用 ensureHostHub 的插件
+// 成为「宿主」：注册唯一的共享事件 SSE 路由并 provide 服务；后续调用者
+// 经 ctx.get 拿到现成服务直接用。客户端 counterpart 见 client/source.js
+// 的 PluginKit.connectEvents / ensureClientHub。
+const EVENT_HUB_ROUTE = '/dsh-event-hub/api/stream'
+const EVENT_HUB_SERVICE = 'dsh-event-hub'
+
+/**
+ * 取得（或创建）进程内唯一的枢纽服务。
+ * @param ctx cordis 插件上下文（用于 provide/get）
+ * @param opts { webServer, connection } 消费插件自己 inject 的服务
+ * @returns { publish(plugin, data), subscriberCount(), dispose() } 或 null
+ */
+function ensureHostHub(ctx, opts) {
+  const o = opts || {}
+  const existing = typeof ctx.get === 'function' ? ctx.get(EVENT_HUB_SERVICE) : null
+  if (existing && typeof existing.publish === 'function') return existing
+  if (!o.webServer || !o.connection) return null
+
+  const subscribers = new Set()
+  let seq = 0
+  const service = {
+    publish(plugin, data) {
+      seq += 1
+      const frame = { seq, plugin, data }
+      const text = `data: ${JSON.stringify(frame)}\n\n`
+      for (const res of subscribers) {
+        try { res.write(text) } catch { subscribers.delete(res) }
+      }
+      return seq
+    },
+    subscriberCount: () => subscribers.size,
+  }
+  try { ctx.provide(EVENT_HUB_SERVICE, service) } catch { /* 已被并发提供：沿用 get 结果 */ }
+
+  try {
+    const disposeRoute = o.webServer.register({
+      kind: 'prefix',
+      path: '/dsh-event-hub/api',
+      handler: async (req, res) => {
+        const rejection = typeof o.connection.requestRejection === 'function'
+          ? o.connection.requestRejection(req)
+          : undefined
+        if (rejection !== undefined) {
+          res.writeHead(rejection)
+          res.end()
+          return
+        }
+        try {
+          const url = new URL(req.url || '/', 'http://dsh.local')
+          if (req.method === 'GET' && url.pathname.replace(/\/+$/, '').endsWith(EVENT_HUB_ROUTE)) {
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream; charset=utf-8',
+              'Cache-Control': 'no-cache, no-transform',
+              Connection: 'keep-alive',
+              'X-Accel-Buffering': 'no',
+            })
+            res.write('retry: 3000\n\n')
+            subscribers.add(res)
+            const heartbeat = setInterval(() => {
+              try { res.write(': ping\n\n') } catch { clearInterval(heartbeat) }
+            }, 25000)
+            req.on('close', () => {
+              clearInterval(heartbeat)
+              subscribers.delete(res)
+            })
+            return
+          }
+          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: `no route for ${req.method} ${url.pathname}` }))
+        } catch (e) {
+          try {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: (e && e.message) || 'internal error' }))
+          } catch { /* res 可能已部分写出 */ }
+        }
+      },
+    })
+    // 路由注销与订阅清场由调用方在自身 effect 清理里触发
+    service.dispose = () => {
+      try { if (typeof disposeRoute === 'function') disposeRoute() } catch {}
+      for (const res of subscribers) { try { res.end() } catch {} }
+      subscribers.clear()
+    }
+  } catch { /* webServer 不可用：服务仍可 provide，仅无 HTTP 通道 */ }
+  return service
+}
+
+module.exports = { createShareRunJob, runShareInProcess, SHARE_RUN_TIMEOUT_MS, SHARE_RUN_OUTPUT_CAP, ensureHostHub, EVENT_HUB_ROUTE, EVENT_HUB_SERVICE }

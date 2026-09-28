@@ -49,7 +49,40 @@ const ShareDialog = PluginKit.makeActionShareDialog(__React)
 `params` 值实时替换进 prompt，用户手改过 prompt 后参数变化不再覆盖（脏跟踪）；
 `completedView` 接管后 Dialog footer 置空，确认/重试/关闭按钮由插槽自承。
 
+
+## 共享事件推送枢纽（0.4.0+）
+
+解决：dsh web 网关是 HTTP/1.1，浏览器对同一源只允许 ~6 条并发连接；每个
+需要实时事件的插件各自开一条永久 SSE，插件一多首页所有请求排队超时。
+本工具箱提供**全页面唯一一条**事件 SSE 的协调与分发：
+
+**宿主侧**（插件 `src/index.js`，进程内协调，第一个调用者注册唯一路由）：
+
+```js
+const { ensureHostHub } = require('@weibaohui/dsh-plugin-kit')
+
+const broadcast = (payload) => {
+  const hub = ensureHostHub(ctx, { webServer: ctx.webServer, connection: ctx.connection })
+  if (hub) hub.publish('dsh-fireworks', payload)   // 软查找：枢纽可多插件复用
+  // ……保留各插件自有 SSE 作为回退通道
+}
+```
+
+**客户端侧**（构建脚本把 `@weibaohui/dsh-plugin-kit/client/source.js` 内联进
+bundle，`PluginKit.connectEvents` 即为裸名可用）：
+
+```js
+const off = PluginKit.connectEvents('dsh-fireworks', (data, frame) => {
+  // data = publish 的 payload；连接断开自动重连
+}, (state) => { liveState = state })
+```
+
+降级次序：枢纽不可用（未安装本包 / EventSource 缺席）时 `connectEvents`
+返回 null，调用方回退自有 SSE 或短轮询——各插件保持独立可安装。
+已在 fireworks / matrix / kite 三个插件落地，页面长连接数从 N 降到 1。
+
 ## 设计决策
+
 
 - **构建期内联而非运行时插件**：kit 不进 profile 的 bundle 图，无降级逻辑；消费者构建时把 client 源码打进自己的 bundle，`dsh plugin add` 时宿主代码经 npm 传递依赖装齐——一次性装上，无挖坑
 - **协议无关**：run/poll 以函数注入，提示词模板归各插件自有（业务层），kit 只收骨架
@@ -60,6 +93,7 @@ const ShareDialog = PluginKit.makeActionShareDialog(__React)
 
 | 插件版本 | 适配 dsh 版本 | 备注 |
 |---------|--------------|------|
-| 0.3.2 | 0.1.7-rc.2 | 当前版本，已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
+| 0.4.0 | 0.1.7-rc.2 | 新增共享事件推送枢纽（ensureHostHub / connectEvents） |
+| 0.3.2 | 0.1.7-rc.2 | 已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
 
 > **发版约定**：每次发布新版本时，请在上表追加一行，记录该插件版本实际验证所用的 `@deepseek-ai/dsh` 版本。`package.json` 的 `engines.dsh` 声明最低支持版本；本表记录实际验证版本，二者配合使用。
