@@ -130,10 +130,14 @@ async function runShareInProcess(services, { prompt, dir, job, logger }) {
 // ── 共享事件推送枢纽（宿主侧）──────────────────────────────────────────
 // 解决：dsh web 网关是 HTTP/1.1，同源并发只有 ~6 条连接，每个插件自建
 // 永久 SSE 会把预算占满、首页全部排队。第一个调用 ensureHostHub 的插件
-// 成为「宿主」：注册唯一的共享事件 SSE 路由并 provide 服务；后续调用者
-// 经 ctx.get 拿到现成服务直接用。客户端 counterpart 见 client/source.js
+// 成为「宿主」：注册唯一的共享事件通道并 provide 服务；后续调用者经
+// ctx.get 拿到现成服务直接用。客户端 counterpart 见 client/source.js
 // 的 PluginKit.connectEvents / ensureClientHub。
+//
+// 双通道：ws（registerUpgrade 官方接口，握手后豁免于 h1.1 连接预算）
+// 为主、SSE 为回退（老客户端 bundle）。publish 双写，帧形状一致。
 const EVENT_HUB_ROUTE = '/dsh-event-hub/api/stream'
+const EVENT_HUB_WS_PATH = '/dsh-event-hub/ws'
 const EVENT_HUB_SERVICE = 'dsh-event-hub'
 
 /**
@@ -148,19 +152,24 @@ function ensureHostHub(ctx, opts) {
   if (existing && typeof existing.publish === 'function') return existing
   if (!o.webServer || !o.connection) return null
 
-  const subscribers = new Set()
+  const subscribers = new Set() // SSE 订阅响应
+  const wsClients = new Set() // WebSocket 客户端
   let seq = 0
   const service = {
     publish(plugin, data) {
       seq += 1
       const frame = { seq, plugin, data }
-      const text = `data: ${JSON.stringify(frame)}\n\n`
+      const sseText = `data: ${JSON.stringify(frame)}\n\n`
+      const wsText = JSON.stringify(frame)
       for (const res of subscribers) {
-        try { res.write(text) } catch { subscribers.delete(res) }
+        try { res.write(sseText) } catch { subscribers.delete(res) }
+      }
+      for (const ws of wsClients) {
+        try { if (ws.readyState === 1) ws.send(wsText) } catch { wsClients.delete(ws) }
       }
       return seq
     },
-    subscriberCount: () => subscribers.size,
+    subscriberCount: () => subscribers.size + wsClients.size,
   }
   try { ctx.provide(EVENT_HUB_SERVICE, service) } catch { /* 已被并发提供：沿用 get 结果 */ }
 
@@ -207,14 +216,40 @@ function ensureHostHub(ctx, opts) {
         }
       },
     })
+    let disposeUpgrade = null
+    try {
+      // WebSocket 主通道：官方 registerUpgrade 接口（网关 19843 透传 upgrade）
+      const { WebSocketServer } = require('ws')
+      const wss = new WebSocketServer({ noServer: true })
+      disposeUpgrade = o.webServer.registerUpgrade({
+        path: EVENT_HUB_WS_PATH,
+        handler: (req, socket, head) => {
+          const rejection = typeof o.connection.requestRejection === 'function'
+            ? o.connection.requestRejection(req)
+            : undefined
+          if (rejection !== undefined) {
+            socket.destroy()
+            return
+          }
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            wsClients.add(ws)
+            ws.on('close', () => wsClients.delete(ws))
+            ws.on('error', () => wsClients.delete(ws))
+          })
+        },
+      })
+    } catch { /* registerUpgrade 接口不存在：降级为仅 SSE */ }
     // 路由注销与订阅清场由调用方在自身 effect 清理里触发
     service.dispose = () => {
       try { if (typeof disposeRoute === 'function') disposeRoute() } catch {}
+      try { if (typeof disposeUpgrade === 'function') disposeUpgrade() } catch {}
       for (const res of subscribers) { try { res.end() } catch {} }
+      for (const ws of wsClients) { try { ws.close() } catch {} }
       subscribers.clear()
+      wsClients.clear()
     }
   } catch { /* webServer 不可用：服务仍可 provide，仅无 HTTP 通道 */ }
   return service
 }
 
-module.exports = { createShareRunJob, runShareInProcess, SHARE_RUN_TIMEOUT_MS, SHARE_RUN_OUTPUT_CAP, ensureHostHub, EVENT_HUB_ROUTE, EVENT_HUB_SERVICE }
+module.exports = { createShareRunJob, runShareInProcess, SHARE_RUN_TIMEOUT_MS, SHARE_RUN_OUTPUT_CAP, ensureHostHub, EVENT_HUB_ROUTE, EVENT_HUB_WS_PATH, EVENT_HUB_SERVICE }
